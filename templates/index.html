@@ -20,7 +20,7 @@
         <!-- Thêm sau student-section -->
         <div class="topic-section">
             <label>📚 Chọn chủ đề ôn tập:</label>
-            <select id="topic-select">
+            <select id="topic-select" onchange="changeTopic()">
                 <option value="dich_viet_anh">Việt → Anh</option>
                 <option value="dich_anh_viet">Anh → Việt</option>
                 <option value="dien_tu">Điền từ</option>
@@ -30,7 +30,6 @@
                 <option value="gioi_tu">Giới từ</option>
                 <option value="all">Tất cả - 350 câu</option>
             </select>
-            <button onclick="changeTopic()">📌 Chọn chủ đề</button>
         </div>
         <div class="game-modes">
             <div class="game-card" onclick="startGame('runner')">
