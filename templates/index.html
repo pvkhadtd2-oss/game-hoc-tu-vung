@@ -42,6 +42,11 @@
             </div>
         </div>
         <div id="student-info" class="info-panel"></div>
+        
+        <!-- Dòng tác giả -->
+        <div class="author-section">
+            <p>✨ Tác giả: <strong>Phạm Kiến Quốc</strong> ✨</p>
+        </div>
     </div>
     <script>
         let currentStudent = '';
@@ -99,7 +104,6 @@
             });
             const data = await res.json();
             if (data.status === 'ok') {
-                // Hiển thị thông báo nhẹ nhàng trong student-info
                 document.getElementById('student-info').innerHTML = 
                     `<p>✅ Đã chọn chủ đề: ${topicName}</p>`;
             }
