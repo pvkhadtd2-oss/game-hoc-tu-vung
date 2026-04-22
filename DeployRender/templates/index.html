@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>English Learning Game - Trang chủ</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🐾 Học Từ Vựng Tiếng Anh</h1>
+        <div class="student-section">
+            <label>👤 Chọn học sinh:</label>
+            <select id="student-select"></select>
+            <div class="add-student">
+                <input type="text" id="new-student" placeholder="Nhập tên mới">
+                <button onclick="addStudent()">➕ Thêm</button>
+            </div>
+        </div>
+        <!-- Thêm sau student-section -->
+        <div class="topic-section">
+            <label>📚 Chọn chủ đề ôn tập:</label>
+            <select id="topic-select">
+                <option value="dich_viet_anh">Việt → Anh</option>
+                <option value="dich_anh_viet">Anh → Việt</option>
+                <option value="dien_tu">Điền từ</option>
+                <option value="dong_nghia">Đồng nghĩa</option>
+                <option value="trai_nghia">Trái nghĩa</option>
+                <option value="dang_dung">Dạng đúng</option>
+                <option value="gioi_tu">Giới từ</option>
+                <option value="all">Tất cả - 350 câu</option>
+            </select>
+            <button onclick="changeTopic()">📌 Chọn chủ đề</button>
+        </div>
+        <div class="game-modes">
+            <div class="game-card" onclick="startGame('runner')">
+                <h2>🏃 Chạy Vô Tận</h2>
+                <p>Nhảy qua chướng ngại vật và trả lời câu hỏi</p>
+            </div>
+            <div class="game-card" onclick="startGame('boss')">
+                <h2>👾 Đấu Boss</h2>
+                <p>Đánh bại boss bằng cách trả lời đúng từ vựng</p>
+            </div>
+        </div>
+        <div id="student-info" class="info-panel"></div>
+    </div>
+    <script>
+        let currentStudent = '';
+        async function loadStudents() {
+            const res = await fetch('/api/students');
+            const students = await res.json();
+            const select = document.getElementById('student-select');
+            select.innerHTML = '';
+            if (students.length === 0) {
+                select.innerHTML = '<option disabled>Chưa có học sinh, hãy tạo mới</option>';
+                return;
+            }
+            students.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.name;
+                opt.textContent = `${s.name} (Cấp ${s.level} - ${s.xp} XP)`;
+                select.appendChild(opt);
+            });
+            currentStudent = students[0].name;
+            showStudentInfo(students[0]);
+        }
+        async function addStudent() {
+            const name = document.getElementById('new-student').value.trim();
+            if (!name) return alert('Nhập tên!');
+            await fetch('/api/students', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name})
+            });
+            document.getElementById('new-student').value = '';
+            loadStudents();
+        }
+        function showStudentInfo(s) {
+            document.getElementById('student-info').innerHTML = 
+                `<p>🎮 ${s.name} | Cấp ${s.level} | XP: ${s.xp}</p>`;
+        }
+        document.getElementById('student-select').addEventListener('change', async (e) => {
+            currentStudent = e.target.value;
+            const res = await fetch(`/api/progress?name=${currentStudent}`);
+            const data = await res.json();
+            if (data) showStudentInfo(data);
+        });
+        function startGame(mode) {
+            if (!currentStudent) return alert('Chọn học sinh trước!');
+            localStorage.setItem('studentName', currentStudent);
+            window.location.href = `/${mode}`;
+        }
+        async function changeTopic() {
+            const topic = document.getElementById('topic-select').value;
+            const res = await fetch('/api/set_topic', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({topic: topic})
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                alert(`Đã chọn chủ đề: ${topic}. Bắt đầu học thôi!`);
+            }
+        }
+        loadStudents();
+    </script>
+</body>
+</html>
