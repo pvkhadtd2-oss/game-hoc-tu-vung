@@ -329,3 +329,16 @@ kbd {
 .topic-section button:hover {
     background: #166088;
 }
+.author-section {
+    text-align: center;
+    margin-top: 20px;
+    padding: 10px;
+    color: #555;
+    font-size: 14px;
+    border-top: 1px solid #ddd;
+}
+
+.author-section strong {
+    color: #2c3e50;
+    font-weight: 600;
+}
