@@ -237,6 +237,10 @@ def runner():
 def boss():
     return render_template('boss.html')
 
+@app.route('/health')
+def health_check():
+    return 'OK', 200
+
 import signal
 import sys
 import os
