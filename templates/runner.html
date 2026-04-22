@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Endless Runner - Học từ vựng</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="game-container" style="max-width: 1320px;">
+        <div class="game-header">
+            <span id="student-name"></span> | Cấp <span id="level">1</span> | XP: <span id="xp">0</span>
+            <span>🏆 Kỷ lục: <span id="high-score">0</span></span>
+            <button id="back-btn" onclick="window.location.href='/'">← Quay lại</button>
+        </div>
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div id="question-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 id="question-word"></h3>
+                <div id="options-container"></div>
+            </div>
+        </div>
+        <div class="game-controls">
+            <button id="restart-btn" class="big-btn" style="background: #e67e22;">🔄 Chơi từ đầu</button>
+            <button id="start-btn" class="big-btn">▶ Chơi tiếp</button>
+            <button id="end-btn" class="big-btn" style="background: #e74c3c;">⏹ Kết thúc</button>
+            <p>Nhấn <kbd>←</kbd> <kbd>→</kbd> di chuyển, <kbd>↑</kbd> nhảy, <kbd>Space</kbd> tạm dừng</p>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/runner.js') }}"></script>
+</body>
+</html>
