@@ -1,233 +1,148 @@
-from flask import Flask, render_template, request, jsonify, session
-import pandas as pd
 import os
 import random
+from flask import Flask, render_template, request, jsonify
+import psycopg2
+from psycopg2 import extras
+from dotenv import load_dotenv
+import pandas as pd
+
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here_change_in_production'
+app.secret_key = os.getenv("SECRET_KEY", "a_default_secret_key_change_me")
 
 DATA_DIR = 'data'
-STUDENTS_FILE = os.path.join(DATA_DIR, 'students.xlsx')
-QUESTIONS_FILE = os.path.join(DATA_DIR, 'questions.xlsx')
-PROGRESS_FILE = os.path.join(DATA_DIR, 'progress.xlsx')   
-# Đầu file app.py, thêm:
 CAU_HOI_DIR = os.path.join(DATA_DIR, 'CauHoi')
-DEFAULT_QUESTIONS_FILE = os.path.join(CAU_HOI_DIR, '01_dich_viet_anh.xlsx')
-
-# Biến lưu file câu hỏi hiện tại (có thể thay đổi theo chủ đề)
-current_questions_file = DEFAULT_QUESTIONS_FILE
-
-# Tạo thư mục data nếu chưa có
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
-# ---------- Khởi tạo file học sinh ----------
-if not os.path.exists(STUDENTS_FILE):
-    df_students = pd.DataFrame(columns=['name', 'level', 'xp', 'high_score'])
-    df_students.to_excel(STUDENTS_FILE, index=False)
-else:
-    df_students = pd.read_excel(STUDENTS_FILE)
-    if 'high_score' not in df_students.columns:
-        df_students['high_score'] = 0
-        df_students.to_excel(STUDENTS_FILE, index=False)
+# ===================== KẾT NỐI DATABASE =====================
+def get_db_connection():
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ConnectionError("DATABASE_URL environment variable is not set.")
+    conn = psycopg2.connect(db_url, sslmode="require")
+    return conn
 
-# ---------- Khởi tạo file câu hỏi (có thêm cột id) ----------
-if not os.path.exists(QUESTIONS_FILE):
-    df_questions = pd.DataFrame({
-        'id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        'word': ['apple', 'dog', 'cat', 'car', 'house', 'book', 'pen', 'teacher', 'school', 'run'],
-        'meaning': ['quả táo', 'con chó', 'con mèo', 'xe hơi', 'ngôi nhà', 'quyển sách', 'bút mực', 'giáo viên', 'trường học', 'chạy'],
-        'wrong1': ['chuối', 'mèo', 'chuột', 'máy bay', 'căn hộ', 'vở', 'thước', 'học sinh', 'bệnh viện', 'đi'],
-        'wrong2': ['cam', 'chim', 'cá', 'tàu hỏa', 'lâu đài', 'báo', 'tẩy', 'bác sĩ', 'công viên', 'nhảy'],
-        'wrong3': ['nho', 'thỏ', 'hổ', 'xe đạp', 'biệt thự', 'tạp chí', 'kẹp giấy', 'công an', 'siêu thị', 'bơi']
-    })
-    df_questions.to_excel(QUESTIONS_FILE, index=False)
-else:
-    df_questions = pd.read_excel(QUESTIONS_FILE)
-    # Thêm cột id nếu chưa có (cho file cũ)
-    if 'id' not in df_questions.columns:
-        df_questions.insert(0, 'id', range(1, len(df_questions)+1))
-        df_questions.to_excel(QUESTIONS_FILE, index=False)
+# ===================== KHỞI TẠO BẢNG & NẠP DỮ LIỆU =====================
+def init_game_db():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # 1. Bảng học sinh
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS game_students (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    level INTEGER DEFAULT 1,
+                    xp INTEGER DEFAULT 0,
+                    high_score INTEGER DEFAULT 0
+                );
+            """)
 
-# ---------- Khởi tạo file tiến độ ----------
-if not os.path.exists(PROGRESS_FILE):
-    df_progress = pd.DataFrame(columns=['student_name', 'question_id', 'completed'])
-    df_progress.to_excel(PROGRESS_FILE, index=False)
+            # 2. Bảng câu hỏi từ vựng
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS game_vocab_questions (
+                    id SERIAL PRIMARY KEY,
+                    topic TEXT NOT NULL DEFAULT 'all',
+                    word TEXT NOT NULL,
+                    meaning TEXT NOT NULL,
+                    wrong1 TEXT NOT NULL,
+                    wrong2 TEXT NOT NULL,
+                    wrong3 TEXT NOT NULL
+                );
+            """)
 
-# ------------------ ROUTES ------------------
+            # 3. Bảng tiến độ
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS game_progress (
+                    id SERIAL PRIMARY KEY,
+                    student_name TEXT NOT NULL REFERENCES game_students(name) ON DELETE CASCADE,
+                    question_id INTEGER NOT NULL REFERENCES game_vocab_questions(id) ON DELETE CASCADE,
+                    completed BOOLEAN DEFAULT FALSE,
+                    UNIQUE(student_name, question_id)
+                );
+            """)
+
+            conn.commit()
+
+            # Nạp dữ liệu câu hỏi nếu bảng game_vocab_questions trống
+            cur.execute("SELECT COUNT(*) FROM game_vocab_questions")
+            if cur.fetchone()[0] == 0:
+                import_vocab_from_excel(cur)
+                conn.commit()
+    finally:
+        conn.close()
+
+def import_vocab_from_excel(cur):
+    file_topic_map = {
+        '01_dich_viet_anh': 'dich_viet_anh',
+        '02_dich_anh_viet': 'dich_anh_viet',
+        '03_dien_tu_vao_cau': 'dien_tu',
+        '04_dong_nghia': 'dong_nghia',
+        '05_trai_nghia': 'trai_nghia',
+        '06_dang_dung_cua_tu': 'dang_dung',
+        '07_gioi_t': 'gioi_tu',
+        '08_Tong_hop_350_cau': 'all'
+    }
+
+    imported = 0
+    if os.path.exists(CAU_HOI_DIR):
+        for filename in os.listdir(CAU_HOI_DIR):
+            if not filename.endswith('.xlsx'):
+                continue
+            filepath = os.path.join(CAU_HOI_DIR, filename)
+            try:
+                df = pd.read_excel(filepath, engine='openpyxl')
+            except Exception as e:
+                print(f"❌ Lỗi đọc {filename}: {e}")
+                continue
+
+            base_name = os.path.splitext(filename)[0]
+            topic = file_topic_map.get(base_name, 'unknown')
+
+            required_cols = ['word', 'meaning', 'wrong1', 'wrong2', 'wrong3']
+            if not all(col in df.columns for col in required_cols):
+                print(f"❌ {filename} thiếu cột, bỏ qua.")
+                continue
+
+            for _, row in df.iterrows():
+                cur.execute(
+                    """INSERT INTO game_vocab_questions (topic, word, meaning, wrong1, wrong2, wrong3)
+                       VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (topic, row['word'], row['meaning'], row['wrong1'], row['wrong2'], row['wrong3'])
+                )
+                imported += 1
+
+    if imported == 0:
+        print("⚠️ Không import được Excel, dùng dữ liệu mẫu mặc định.")
+        insert_default_questions(cur)
+    else:
+        print(f"✅ Đã import {imported} câu hỏi từ {CAU_HOI_DIR}")
+
+def insert_default_questions(cur):
+    defaults = [
+        ('all', 'apple', 'quả táo', 'chuối', 'cam', 'nho'),
+        ('all', 'dog', 'con chó', 'mèo', 'chim', 'thỏ'),
+        ('all', 'cat', 'con mèo', 'chuột', 'cá', 'hổ'),
+        ('all', 'car', 'xe hơi', 'máy bay', 'tàu hỏa', 'xe đạp'),
+        ('all', 'house', 'ngôi nhà', 'căn hộ', 'lâu đài', 'biệt thự'),
+        ('all', 'book', 'quyển sách', 'vở', 'báo', 'tạp chí'),
+        ('all', 'pen', 'bút mực', 'thước', 'tẩy', 'kẹp giấy'),
+        ('all', 'teacher', 'giáo viên', 'học sinh', 'bác sĩ', 'công an'),
+        ('all', 'school', 'trường học', 'bệnh viện', 'công viên', 'siêu thị'),
+        ('all', 'run', 'chạy', 'đi', 'nhảy', 'bơi')
+    ]
+    cur.executemany(
+        "INSERT INTO game_vocab_questions (topic, word, meaning, wrong1, wrong2, wrong3) VALUES (%s, %s, %s, %s, %s, %s)",
+        defaults
+    )
+    print("✅ Đã thêm 10 câu hỏi mẫu.")
+
+# ===================== ROUTES =====================
 @app.route('/')
 def index():
     return render_template('index.html')
-
-@app.route('/api/students', methods=['GET', 'POST'])
-def manage_students():
-    df = pd.read_excel(STUDENTS_FILE)
-    if request.method == 'GET':
-        return jsonify(df.to_dict(orient='records'))
-    else:  # POST
-        data = request.json
-        name = data.get('name', '').strip()
-        if not name:
-            return jsonify({'error': 'Tên không được để trống'}), 400
-        if name not in df['name'].values:
-            new_row = pd.DataFrame([{'name': name, 'level': 1, 'xp': 0, 'high_score': 0}])
-            df = pd.concat([df, new_row], ignore_index=True)
-            df.to_excel(STUDENTS_FILE, index=False)
-        return jsonify({'status': 'ok'})
-
-@app.route('/api/progress', methods=['GET', 'POST'])
-def progress():
-    df_students = pd.read_excel(STUDENTS_FILE)
-    df_progress = pd.read_excel(PROGRESS_FILE)
-
-    # ----- GET: Trả về thông tin học sinh (có high_score) -----
-    if request.method == 'GET':
-        name = request.args.get('name')
-        if name in df_students['name'].values:
-            student = df_students[df_students['name'] == name].iloc[0].to_dict()
-            if 'high_score' not in student:
-                student['high_score'] = 0
-            return jsonify(student)
-        return jsonify(None)
-
-    # ----- POST: Cập nhật XP, Level, High Score (có điều kiện) và đánh dấu câu hỏi -----
-    else:
-        data = request.json
-        name = data['name']
-        xp_gain = data.get('xp_gain', 0)
-        score = data.get('score')          # Có thể không có
-        question_id = data.get('question_id')
-
-        idx = df_students[df_students['name'] == name].index[0]
-
-        # Cập nhật XP và Level
-        df_students.at[idx, 'xp'] += xp_gain
-        df_students.at[idx, 'level'] = 1 + df_students.at[idx, 'xp'] // 100
-
-        # Chỉ cập nhật high_score nếu score được gửi lên
-        if score is not None:
-            if 'high_score' not in df_students.columns:
-                df_students['high_score'] = 0
-            current_high = df_students.at[idx, 'high_score']
-            if score > current_high:
-                df_students.at[idx, 'high_score'] = score
-
-        df_students.to_excel(STUDENTS_FILE, index=False)
-
-        # Đánh dấu câu hỏi đã hoàn thành
-        if question_id is not None:
-            mask = (df_progress['student_name'] == name) & (df_progress['question_id'] == question_id)
-            if not mask.any():
-                new_progress = pd.DataFrame([{
-                    'student_name': name,
-                    'question_id': question_id,
-                    'completed': True
-                }])
-                df_progress = pd.concat([df_progress, new_progress], ignore_index=True)
-            else:
-                df_progress.loc[mask, 'completed'] = True
-            df_progress.to_excel(PROGRESS_FILE, index=False)
-
-        return jsonify({
-            'status': 'ok',
-            'level': int(df_students.at[idx, 'level']),
-            'xp': int(df_students.at[idx, 'xp']),
-            'high_score': int(df_students.at[idx, 'high_score']) if 'high_score' in df_students.columns else 0
-        })
-
-@app.route('/api/question')
-def get_question():
-    name = request.args.get('name')
-    if not name:
-        return jsonify({'error': 'Missing student name'}), 400
-
-    # Dùng file câu hỏi hiện tại (có thể là tong_hop.xlsx hoặc chủ đề khác)
-    df_q = pd.read_excel(current_questions_file)
-    df_progress = pd.read_excel(PROGRESS_FILE)
-
-    # Lấy danh sách ID câu hỏi đã hoàn thành của học sinh này
-    completed_ids = df_progress[(df_progress['student_name'] == name) & (df_progress['completed'] == True)]['question_id'].tolist()
-
-    # Lọc ra các câu hỏi chưa hoàn thành
-    available_questions = df_q[~df_q['id'].isin(completed_ids)]
-
-    if available_questions.empty:
-        # Nếu không còn câu hỏi nào, trả về thông báo đặc biệt (client sẽ xử lý)
-        return jsonify({'completed_all': True})
-
-    # Chọn ngẫu nhiên một câu
-    row = available_questions.sample(1).iloc[0]
-    options = [row['meaning'], row['wrong1'], row['wrong2'], row['wrong3']]
-    random.shuffle(options)
-
-    return jsonify({
-        'id': int(row['id']),   # <<< Trả về ID để client gửi lại khi trả lời đúng
-        'word': row['word'],
-        'correct': row['meaning'],
-        'options': options
-    })
-
-@app.route('/api/set_topic', methods=['POST'])
-def set_topic():
-    """Đổi file câu hỏi theo chủ đề được chọn."""
-    global current_questions_file
-    
-    data = request.json
-    topic = data.get('topic', 'tong_hop')
-    
-    # Map tên chủ đề với tên file
-    file_map = {
-        'all': '08_Tong_hop_350_cau.xlsx',
-        'dich_viet_anh': '01_dich_viet_anh.xlsx',
-        'dich_anh_viet': '02_dich_anh_viet.xlsx',
-        'dien_tu': '03_dien_tu_vao_cau.xlsx',
-        'dong_nghia': '04_dong_nghia.xlsx',
-        'trai_nghia': '05_trai_nghia.xlsx',
-        'dang_dung': '06_dang_dung_cua_tu.xlsx',
-        'gioi_tu': '07_gioi_t.xlsx'
-    }
-    
-    filename = file_map.get(topic, 'tong_hop.xlsx')
-    new_file = os.path.join(CAU_HOI_DIR, filename)
-    
-    if os.path.exists(new_file):
-        current_questions_file = new_file
-        return jsonify({'status': 'ok', 'topic': topic, 'file': filename})
-    else:
-        return jsonify({'error': f'Không tìm thấy file {filename}'}), 404
-    
-@app.route('/api/reset', methods=['POST'])
-def reset_student():
-    data = request.json
-    name = data.get('name')
-    if not name:
-        return jsonify({'error': 'Thiếu tên'}), 400
-
-    df_students = pd.read_excel(STUDENTS_FILE)
-    if name not in df_students['name'].values:
-        return jsonify({'error': 'Học sinh không tồn tại'}), 404
-
-    idx = df_students[df_students['name'] == name].index[0]
-    # Reset level và xp, giữ nguyên high_score
-    df_students.at[idx, 'level'] = 1
-    df_students.at[idx, 'xp'] = 0
-    # KHÔNG đụng đến high_score
-
-    df_students.to_excel(STUDENTS_FILE, index=False)
-
-    # Xóa toàn bộ tiến độ câu hỏi của học sinh (vẫn giữ)
-    df_progress = pd.read_excel(PROGRESS_FILE)
-    df_progress = df_progress[df_progress['student_name'] != name]
-    df_progress.to_excel(PROGRESS_FILE, index=False)
-
-    # Trả về high_score hiện tại
-    current_high = int(df_students.at[idx, 'high_score']) if 'high_score' in df_students.columns else 0
-    return jsonify({
-        'status': 'ok',
-        'level': 1,
-        'xp': 0,
-        'high_score': current_high
-    })
 
 @app.route('/runner')
 def runner():
@@ -238,22 +153,202 @@ def boss():
     return render_template('boss.html')
 
 @app.route('/health')
+@app.route('/ping')
 def health_check():
-    return 'OK', 200
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return jsonify({"status": "ok", "db": "connected"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "db": "down", "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
-import signal
-import sys
-import os
+# ---------- HỌC SINH ----------
+@app.route('/api/students', methods=['GET', 'POST'])
+def manage_students():
+    conn = get_db_connection()
+    try:
+        if request.method == 'GET':
+            with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                cur.execute("SELECT name, level, xp, high_score FROM game_students ORDER BY name")
+                students = cur.fetchall()
+            return jsonify(students)
 
-def signal_handler(sig, frame):
-    print('\n🛑 Đang tắt server...')
-    sys.exit(0)
+        # POST: thêm học sinh mới
+        data = request.json
+        name = data.get('name', '').strip()
+        if not name:
+            return jsonify({'error': 'Tên không được để trống'}), 400
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM game_students WHERE name = %s", (name,))
+            if not cur.fetchone():
+                cur.execute("INSERT INTO game_students (name) VALUES (%s)", (name,))
+                conn.commit()
+        return jsonify({'status': 'ok'})
+    finally:
+        conn.close()
 
+# ---------- TIẾN ĐỘ ----------
+@app.route('/api/progress', methods=['GET', 'POST'])
+def progress():
+    conn = get_db_connection()
+    try:
+        if request.method == 'GET':
+            name = request.args.get('name')
+            if not name:
+                return jsonify(None)
+            with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+                cur.execute("SELECT name, level, xp, high_score FROM game_students WHERE name = %s", (name,))
+                student = cur.fetchone()
+            return jsonify(student)
+
+        # POST: cập nhật
+        data = request.json
+        name = data['name']
+        xp_gain = data.get('xp_gain', 0)
+        score = data.get('score')
+        question_id = data.get('question_id')
+
+        with conn.cursor() as cur:
+            # Cập nhật XP, level, high_score (dùng CASE cho high_score)
+            cur.execute("""
+                UPDATE game_students
+                SET xp = xp + %s,
+                    level = 1 + ((xp + %s) / 100),
+                    high_score = CASE
+                        WHEN %s IS NOT NULL AND %s > high_score THEN %s
+                        ELSE high_score
+                    END
+                WHERE name = %s
+                RETURNING level, xp, high_score
+            """, (xp_gain, xp_gain, score, score, score, name))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'Học sinh không tồn tại'}), 404
+            level, xp, high_score = row
+
+            # Đánh dấu câu hỏi
+            if question_id is not None:
+                cur.execute("""
+                    INSERT INTO game_progress (student_name, question_id, completed)
+                    VALUES (%s, %s, TRUE)
+                    ON CONFLICT (student_name, question_id) DO UPDATE SET completed = TRUE
+                """, (name, question_id))
+            conn.commit()
+
+        return jsonify({
+            'status': 'ok',
+            'level': level,
+            'xp': xp,
+            'high_score': high_score
+        })
+    finally:
+        conn.close()
+
+# ---------- LẤY CÂU HỎI ----------
+@app.route('/api/question')
+def get_question():
+    name = request.args.get('name')
+    if not name:
+        return jsonify({'error': 'Missing student name'}), 400
+
+    # Client có thể gửi topic, mặc định 'all'
+    topic = request.args.get('topic', 'all')
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+            # Lấy danh sách câu hỏi đã hoàn thành của học sinh này
+            cur.execute("""
+                SELECT question_id FROM game_progress
+                WHERE student_name = %s AND completed = TRUE
+            """, (name,))
+            completed_ids = [row['question_id'] for row in cur.fetchall()]
+
+            if completed_ids:
+                cur.execute("""
+                    SELECT id, word, meaning, wrong1, wrong2, wrong3
+                    FROM game_vocab_questions
+                    WHERE topic = %s AND id NOT IN %s
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (topic, tuple(completed_ids)))
+            else:
+                cur.execute("""
+                    SELECT id, word, meaning, wrong1, wrong2, wrong3
+                    FROM game_vocab_questions
+                    WHERE topic = %s
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """, (topic,))
+
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'completed_all': True})
+
+            options = [row['meaning'], row['wrong1'], row['wrong2'], row['wrong3']]
+            random.shuffle(options)
+            return jsonify({
+                'id': row['id'],
+                'word': row['word'],
+                'correct': row['meaning'],
+                'options': options
+            })
+    finally:
+        conn.close()
+
+# ---------- ĐỔI CHỦ ĐỀ ----------
+@app.route('/api/set_topic', methods=['POST'])
+def set_topic():
+    data = request.json
+    topic = data.get('topic', 'all')
+    # Không lưu server, client nên tự gửi topic khi gọi /api/question
+    return jsonify({'status': 'ok', 'topic': topic})
+
+# ---------- RESET HỌC SINH ----------
+@app.route('/api/reset', methods=['POST'])
+def reset_student():
+    data = request.json
+    name = data.get('name')
+    if not name:
+        return jsonify({'error': 'Thiếu tên'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Reset level và xp, giữ nguyên high_score
+            cur.execute("""
+                UPDATE game_students
+                SET level = 1, xp = 0
+                WHERE name = %s
+                RETURNING high_score
+            """, (name,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({'error': 'Học sinh không tồn tại'}), 404
+            high_score = row[0]
+
+            # Xóa toàn bộ tiến độ của học sinh này
+            cur.execute("DELETE FROM game_progress WHERE student_name = %s", (name,))
+            conn.commit()
+
+        return jsonify({
+            'status': 'ok',
+            'level': 1,
+            'xp': 0,
+            'high_score': high_score
+        })
+    finally:
+        conn.close()
+
+# ===================== KHỞI ĐỘNG =====================
 if __name__ == '__main__':
-    # Render sẽ gán PORT qua biến môi trường
-    port = int(os.environ.get('PORT', 5000))
-    print(f"🚀 Server đang chạy tại port {port}")
+    init_game_db()
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Game server running on port {port}")
     app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
