@@ -67,6 +67,9 @@
             });
             currentStudent = students[0].name;
             showStudentInfo(students[0]);
+            if (students.length > 0) {
+                changeTopic();
+            }
         }
         async function addStudent() {
             const name = document.getElementById('new-student').value.trim();
