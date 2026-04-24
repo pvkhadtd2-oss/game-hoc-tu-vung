@@ -94,18 +94,23 @@
             localStorage.setItem('studentName', currentStudent);
             window.location.href = `/${mode}`;
         }
-        async function changeTopic() {
+       async function changeTopic() {
             const topic = document.getElementById('topic-select').value;
             const topicName = document.getElementById('topic-select').selectedOptions[0].text;
+            
+            // Gửi kèm tên học sinh hiện tại
             const res = await fetch('/api/set_topic', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({topic: topic})
+                body: JSON.stringify({
+                    topic: topic,
+                    name: currentStudent   // <<< dùng biến currentStudent đã có
+                })
             });
             const data = await res.json();
             if (data.status === 'ok') {
                 document.getElementById('student-info').innerHTML = 
-                    `<p>✅ Đã chọn chủ đề: ${topicName}</p>`;
+                    `<p>✅ ${currentStudent} đã chọn: ${topicName}</p>`;
             }
         }
         loadStudents();
