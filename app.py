@@ -39,7 +39,9 @@ def init_game_db():
                     high_score INTEGER DEFAULT 0
                 );
             """)
-
+            cur.execute("""
+                ALTER TABLE game_students ADD COLUMN IF NOT EXISTS current_topic TEXT DEFAULT 'all';
+            """)
             # 2. Bảng câu hỏi từ vựng
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS game_vocab_questions (
@@ -257,19 +259,27 @@ def get_question():
     if not name:
         return jsonify({'error': 'Missing student name'}), 400
 
-    # Client có thể gửi topic, mặc định 'all'
-    topic = request.args.get('topic', 'all')
-
+    # Lấy topic: ưu tiên query string, nếu không có thì lấy từ bảng game_students
+    topic = request.args.get('topic')
     conn = get_db_connection()
     try:
+        # Nếu client không gửi topic, lấy current_topic của học sinh
+        if not topic:
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_topic FROM game_students WHERE name = %s", (name,))
+                row = cur.fetchone()
+                topic = row[0] if row else 'all'
+
+        # Lấy danh sách câu hỏi chưa hoàn thành theo topic
         with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-            # Lấy danh sách câu hỏi đã hoàn thành của học sinh này
+            # Lấy danh sách question_id đã hoàn thành của học sinh
             cur.execute("""
                 SELECT question_id FROM game_progress
                 WHERE student_name = %s AND completed = TRUE
             """, (name,))
             completed_ids = [row['question_id'] for row in cur.fetchall()]
 
+            # Tìm câu hỏi ngẫu nhiên chưa hoàn thành
             if completed_ids:
                 cur.execute("""
                     SELECT id, word, meaning, wrong1, wrong2, wrong3
@@ -291,8 +301,10 @@ def get_question():
             if not row:
                 return jsonify({'completed_all': True})
 
+            # Trộn các đáp án
             options = [row['meaning'], row['wrong1'], row['wrong2'], row['wrong3']]
             random.shuffle(options)
+
             return jsonify({
                 'id': row['id'],
                 'word': row['word'],
@@ -307,8 +319,21 @@ def get_question():
 def set_topic():
     data = request.json
     topic = data.get('topic', 'all')
-    # Không lưu server, client nên tự gửi topic khi gọi /api/question
-    return jsonify({'status': 'ok', 'topic': topic})
+    name = data.get('name')          # <<< Cần tên học sinh
+
+    if not name:
+        return jsonify({'error': 'Missing student name'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE game_students SET current_topic = %s WHERE name = %s
+            """, (topic, name))
+            conn.commit()
+        return jsonify({'status': 'ok', 'topic': topic})
+    finally:
+        conn.close()
 
 # ---------- RESET HỌC SINH ----------
 @app.route('/api/reset', methods=['POST'])
