@@ -14,6 +14,12 @@
             <button id="back-btn" onclick="window.location.href='/'">← Quay lại</button>
         </div>
         <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <!-- Điều khiển cảm ứng (chỉ hiển thị trên mobile) -->
+        <div id="touch-controls" class="touch-controls">
+            <button id="btn-left" class="ctrl-btn">◀</button>
+            <button id="btn-jump" class="ctrl-btn jump-btn">▲</button>
+            <button id="btn-right" class="ctrl-btn">▶</button>
+        </div>
         <div id="question-modal" class="modal hidden">
             <div class="modal-content">
                 <h3 id="question-word"></h3>

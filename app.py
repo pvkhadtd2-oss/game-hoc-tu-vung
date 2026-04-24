@@ -370,6 +370,30 @@ def reset_student():
         })
     finally:
         conn.close()
+@app.route('/api/debug/topics')
+def debug_topics():
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
+            # Thông tin học sinh và current_topic
+            cur.execute("SELECT id, name, current_topic FROM game_students ORDER BY id")
+            students = cur.fetchall()
+
+            # Thống kê câu hỏi theo topic
+            cur.execute("SELECT topic, COUNT(*) as total FROM game_vocab_questions GROUP BY topic ORDER BY topic")
+            topic_counts = cur.fetchall()
+
+            # Vài câu hỏi mẫu (để kiểm tra nội dung)
+            cur.execute("SELECT * FROM game_vocab_questions LIMIT 5")
+            sample_questions = cur.fetchall()
+
+        return jsonify({
+            'students': students,
+            'topic_counts': topic_counts,
+            'sample_questions': sample_questions
+        })
+    finally:
+        conn.close()
 
 # ===================== KHỞI ĐỘNG =====================
 if __name__ == '__main__':

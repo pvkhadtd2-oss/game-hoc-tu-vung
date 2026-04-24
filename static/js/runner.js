@@ -60,6 +60,11 @@ const keys = {
     Space: false
 };
 
+// === Thêm BIẾN CHO TOUCH (đặt sau dòng khai báo keys) ===
+let moveLeft = false;
+let moveRight = false;
+let jumpRequested = false;
+
 const obstacleTypes = [
     { name: 'normal', width: 80, height: 60, yOffset: 0 },
     { name: 'tall',   width: 60, height: 120, yOffset: -20 },
@@ -191,8 +196,8 @@ function update() {
     }
 
     player.vx = 0;
-    if (keys.ArrowLeft) player.vx = -player.speed;
-    if (keys.ArrowRight) player.vx = player.speed;
+    if (keys.ArrowLeft || moveLeft) player.vx = -player.speed;
+    if (keys.ArrowRight || moveRight) player.vx = player.speed;
     player.x += player.vx;
     player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
 
@@ -202,6 +207,13 @@ function update() {
         player.y = GROUND_Y;
         player.vy = 0;
         player.grounded = true;
+    }
+
+    // Nhảy bằng nút cảm ứng
+    if (jumpRequested && player.grounded) {
+        player.vy = JUMP_FORCE;
+        player.grounded = false;
+        jumpRequested = false;  // reset để không nhảy liên tục
     }
 
     if (!questionActive) {
@@ -481,5 +493,34 @@ function resizeCanvas() {
 
 window.addEventListener('resize', resizeCanvas);
 window.addEventListener('load', resizeCanvas);
+
+// === CÀI ĐẶT NÚT CẢM ỨNG ===
+function setupTouchControls() {
+    const leftBtn = document.getElementById('btn-left');
+    const rightBtn = document.getElementById('btn-right');
+    const jumpBtn = document.getElementById('btn-jump');
+    if (!leftBtn || !rightBtn || !jumpBtn) return;
+
+    function setMove(dir, state) {
+        if (dir === 'left') moveLeft = state;
+        if (dir === 'right') moveRight = state;
+    }
+
+    // Di chuyển trái – giữ để đi liên tục
+    leftBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); setMove('left', true); });
+    leftBtn.addEventListener('pointerup', (e) => { e.preventDefault(); setMove('left', false); });
+    leftBtn.addEventListener('pointerleave', (e) => { setMove('left', false); });
+    leftBtn.addEventListener('pointercancel', (e) => { setMove('left', false); });
+
+    // Di chuyển phải
+    rightBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); setMove('right', true); });
+    rightBtn.addEventListener('pointerup', (e) => { e.preventDefault(); setMove('right', false); });
+    rightBtn.addEventListener('pointerleave', (e) => { setMove('right', false); });
+    rightBtn.addEventListener('pointercancel', (e) => { setMove('right', false); });
+
+    // Nhảy – kích hoạt 1 lần mỗi lần chạm
+    jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpRequested = true; });
+}
+setupTouchControls();
 
 console.log('Runner HD+ sẵn sàng (kỷ lục chỉ cập nhật khi kết thúc)');
