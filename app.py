@@ -82,7 +82,7 @@ def import_vocab_from_excel(cur):
         '04_dong_nghia': 'dong_nghia',
         '05_trai_nghia': 'trai_nghia',
         '06_dang_dung_cua_tu': 'dang_dung',
-        '07_gioi_t': 'gioi_tu',
+        '07_gioi_tu': 'gioi_tu',
         '08_Tong_hop_350_cau': 'all'
     }
 
